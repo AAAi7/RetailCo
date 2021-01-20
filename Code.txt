@@ -1,0 +1,1046 @@
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using Retail_Co_V1.Models;
+using Microsoft.AspNetCore.Http;
+using Retail_Co_V1.Models.StaffLogin;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class Dashboard : Controller
+    {
+        private IConfiguration Configuration;
+        public Dashboard(IConfiguration iConfig)
+        {
+            Configuration = iConfig;
+        }
+
+
+        public IActionResult Panel()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            StaffPanelInfo PanelInfo = new StaffPanelInfo();
+
+
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand("select * from Staff where UserID=" + HttpContext.Session.GetString("UserID"),sqlcon);
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            reader.Read();
+            PanelInfo.StaffUserID = int.Parse(reader[0].ToString());
+            PanelInfo.StaffName = reader[3].ToString();
+            PanelInfo.StaffLastname = reader[4].ToString();
+            PanelInfo.StaffUsername = reader[1].ToString();
+            reader.Close();
+            sqlcom = new SqlCommand("select * from Orders where Status='PENDING'", sqlcon);
+            reader = sqlcom.ExecuteReader();
+            PanelInfo.NewOrders = 0;
+            if(reader.HasRows)
+            {
+                while(reader.Read())
+                {
+                    PanelInfo.NewOrders += 1;
+                }
+            }
+            reader.Close();
+
+            //,,,
+            sqlcom = new SqlCommand("select * from Reviews where Status='PENDING'", sqlcon);
+            reader = sqlcom.ExecuteReader();
+            PanelInfo.NewReviews = 0;
+            if (reader.HasRows)
+            {
+                while (reader.Read())
+                {
+                    PanelInfo.NewReviews += 1;
+                }
+            }
+            reader.Close();
+
+            return View(PanelInfo);
+        }
+
+        public IActionResult Reviews()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand("select * from Reviews where Status='PENDING' ", sqlcon);
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            Reviews AllReviews = new Reviews();
+            if(reader.HasRows)
+            {
+                while(reader.Read())
+                {
+                    AllReviews.IDs.Add(int.Parse(reader[0].ToString()));
+                    AllReviews.UserName.Add(reader[2].ToString());
+                    AllReviews.Date.Add(reader[5].ToString());
+                    AllReviews.Description.Add(reader[4].ToString());
+                    AllReviews.WebCode.Add(reader[7].ToString());
+
+
+
+
+                }
+                reader.Close();
+            }
+            sqlcon.Close();
+            return View(AllReviews) ;
+        }
+
+        public IActionResult SetReviewStatus(string Status,int ID)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand("Update Reviews set Status='"+Status+"' where ReviewID=" + ID, sqlcon);
+            sqlcom.ExecuteNonQuery();
+            sqlcon.Close();
+            return RedirectToAction("Reviews", "Dashboard");
+        }
+
+        public IActionResult StaffLogout()
+        {
+            HttpContext.Session.Clear();
+            return RedirectToAction("Index", "Home");
+        }
+
+        public IActionResult Orders(string Filter, string OrderNumber)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            AllOrdersInfo Orders = new AllOrdersInfo();
+
+            if (OrderNumber == null)
+            {
+                Orders.DataType = "ALL";
+                sqlcon.Open();
+                SqlCommand sqlcom = new SqlCommand();
+
+                if (Filter == "Pendings")
+                {
+                    sqlcom = new SqlCommand("select * from Orders where Status='PENDING'", sqlcon);
+                }
+                else if (Filter == "CompleteOrders")
+                {
+                    sqlcom = new SqlCommand("select * from Orders where Status='COMPLETE'", sqlcon);
+
+                }
+                else
+                {
+                    sqlcom = new SqlCommand("select * from Orders", sqlcon);
+
+                }
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        Orders.OrderID.Add(int.Parse(reader[0].ToString()));
+                        Orders.OrderNo.Add(reader[1].ToString());
+                        Orders.CustomerID.Add(reader[2].ToString());
+                        Orders.Status.Add(reader[5].ToString());
+                        Orders.Date.Add(reader[4].ToString());
+                    }
+                }
+                if (Orders.OrderID.Count > 0)
+                {
+                    reader.Close();
+                    for (int i = 0; i < Orders.OrderNo.Count; i++)
+                    {
+                        int Total = 0;
+                        sqlcom = new SqlCommand("select * from OrderHelper where OrderNo='" + Orders.OrderNo[i] + "'", sqlcon);
+                        reader = sqlcom.ExecuteReader();
+                        double ItemCount = 0;
+                        double ShippedItems = 0;
+                        if (reader.HasRows)
+                        {
+                            while (reader.Read())
+                            {
+                                ItemCount++;
+                                if(reader[4].ToString()=="SHIPPED")
+                                {
+                                    ShippedItems++;
+                                }
+                                Total += int.Parse(reader[3].ToString());
+                            }
+                            double Progress = 100 * ShippedItems;
+                            Progress = Progress / ItemCount;
+                            Orders.OrderProgress.Add(Progress);
+                            
+                        }
+                        reader.Close();
+                        Orders.Total.Add(Total.ToString());
+                    }
+                }
+                reader.Close();
+            }
+            else
+            {
+                Orders.DataType = "ONE";
+                SqlCommand sqlcom = new SqlCommand("", sqlcon);
+                sqlcon.Open();
+                sqlcom = new SqlCommand("select * from OrderHelper where OrderNo='"+OrderNumber+"'", sqlcon);
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                while(reader.Read())
+                {
+                    Orders.HelperID.Add(reader[0].ToString());
+                    Orders.ItemWebCode.Add(reader[2].ToString());
+                    Orders.ItemPrice.Add(reader[3].ToString());
+                    Orders.ItemStaus.Add(reader[4].ToString());
+
+                }
+                reader.Close();
+                for(int i=0; i<Orders.ItemWebCode.Count;i++)
+                {
+                    sqlcom = new SqlCommand("select * from Items where WebCode='" + Orders.ItemWebCode[i] + "'", sqlcon);
+                    reader = sqlcom.ExecuteReader();
+                    reader.Read();
+                    Orders.ItemTitle.Add(reader[2].ToString());
+                    reader.Close();
+                }
+                sqlcom = new SqlCommand("select Status from Orders where OrderNo='" + OrderNumber + "'", sqlcon);
+                reader = sqlcom.ExecuteReader();
+                reader.Read();
+                Orders.Status.Add(reader[0].ToString());
+                reader.Close();
+                Orders.OrderNo.Add(OrderNumber);
+
+
+            }
+
+            sqlcon.Close();
+            return View(Orders);
+
+        }
+
+        public IActionResult ItemShipped(string HelperID,string OrderNumber)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand("update OrderHelper set Status='SHIPPED' where HelperID=" + HelperID, sqlcon);
+            sqlcom.ExecuteNonQuery();
+            sqlcon.Close();
+            CheckOrderDetails(OrderNumber);
+            return RedirectToAction("Orders", new { OrderNumber = OrderNumber });
+        }
+        public void CheckOrderDetails(string OrderNumber)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand("select Status from OrderHelper where OrderNo='" + OrderNumber + "'", sqlcon);
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            bool IsComplete = true;
+            while(reader.Read())
+            {
+                if(reader[0].ToString()=="PENDING")
+                {
+                    IsComplete = false;
+                    break;
+                }
+            }
+            reader.Close();
+            if(IsComplete==true)
+            {
+                sqlcom = new SqlCommand("Update Orders set Status='COMPLETE' where OrderNo='" + OrderNumber + "'", sqlcon);
+                sqlcom.ExecuteNonQuery();
+            }
+            sqlcon.Close();
+
+        }
+    }
+}
+
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Retail_Co_V1.Models;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class HomeController : Controller
+    {
+        private readonly ILogger<HomeController> _logger;
+
+        public HomeController(ILogger<HomeController> logger)
+        {
+            _logger = logger;
+        }
+
+        public IActionResult Index()
+        {
+            return View();
+        }
+
+        public IActionResult Privacy()
+        {
+            return View();
+        }
+
+        [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+        public IActionResult Error()
+        {
+            return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+        }
+    }
+}
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using Retail_Co_V1.Models;
+using Microsoft.AspNetCore.Http;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class LoginController : Controller
+    {
+        
+        private IConfiguration Configuration;
+        public LoginController(IConfiguration iConfig)
+        {
+            Configuration = iConfig;
+        }
+        public IActionResult StaffLogin()
+        {
+            
+            return View();
+        }
+
+        public IActionResult CustomerLogin()
+        {
+            if(HttpContext.Session.GetString("UserID")==null)
+            {
+                return View();
+
+            }
+            else
+            {
+                return RedirectToAction("Profile", "MyAccount");
+            }
+        }
+        public IActionResult StaffLoginRequest(string Username,string password)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            try
+            {
+               
+                sqlcon.Open();
+                SqlCommand sqlcom = new SqlCommand("select * from Staff where Username='" + Username + "'", sqlcon);
+
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    if (reader[2].ToString() == password)
+                    {
+                        HttpContext.Session.SetString("UserID", reader[0].ToString());
+                        HttpContext.Session.SetInt32("UserAuthority", int.Parse(reader[5].ToString()));
+                        return RedirectToAction("Panel", "Dashboard");
+
+                    }
+                    else
+                    {
+                        TempData["LoginStatus"] = "Failed";
+                        return RedirectToAction("StaffLogin", "Login");
+
+                    }
+                }
+                else
+                {
+                    TempData["LoginStatus"] = "Failed";
+                    return RedirectToAction("StaffLogin", "Login");
+
+                }
+            }
+            catch
+            {
+                TempData["LoginStatus"] = "Failed";
+                return RedirectToAction("StaffLogin", "Login");
+            }
+            finally
+            {
+                sqlcon.Close();
+            }
+        }
+        public IActionResult CustomerLoginRequest(string Email, string password)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            try
+            {
+
+                sqlcon.Open();
+                SqlCommand sqlcom = new SqlCommand("select * from Customers where Email='" + Email + "'", sqlcon);
+
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    if (reader[2].ToString() == password)
+                    {
+                        
+                        HttpContext.Session.SetInt32("UserID",int.Parse( reader[0].ToString()));
+                        HttpContext.Session.SetString("CustomerName", reader[1].ToString());
+                        string cart = HttpContext.Session.GetString("UserCart");
+                        cart += reader[6].ToString();
+                        HttpContext.Session.SetString("UserCart", cart);
+                        reader.Close();
+                        sqlcom = new SqlCommand("update Customers set Cart='" + cart + "'", sqlcon);
+                        sqlcom.ExecuteNonQuery();
+                        return RedirectToAction("Profile", "MyAccount");
+
+                    }
+                    else
+                    {
+                        TempData["LoginStatus"] = "Failed";
+                        return RedirectToAction("CustomerLogin", "Login");
+
+                    }
+                }
+                else
+                {
+                    TempData["LoginStatus"] = "Failed";
+                    return RedirectToAction("CustomerLogin", "Login");
+
+                }
+            }
+            //catch
+            //{
+            //    TempData["LoginStatus"] = "Failed";
+            //    return RedirectToAction("CustomerLogin", "Login");
+            //}
+            finally
+            {
+                sqlcon.Close();
+            }
+        }
+
+
+    }
+}
+
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using Retail_Co_V1.Models;
+using Microsoft.AspNetCore.Http;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class MyAccountController : Controller
+    {
+        private IConfiguration Configuration;
+        public MyAccountController(IConfiguration iConfig)
+        {
+            Configuration = iConfig;
+        }
+        public IActionResult Profile()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            SqlCommand sqlcom = new SqlCommand("select * from Customers where CustomerID=" + HttpContext.Session.GetInt32("UserID"), sqlcon);
+            sqlcon.Open();
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            reader.Read();
+            UserProfile Profile = new UserProfile();
+            Profile.ID = int.Parse(reader[0].ToString());
+            Profile.Email = reader[1].ToString();
+            Profile.Name = reader[3].ToString();
+            Profile.LastName = reader[4].ToString();
+            Profile.Address = reader[5].ToString();
+            reader.Close();
+            //user profile
+            sqlcom = new SqlCommand("select * from Orders where Customer=" + HttpContext.Session.GetInt32("UserID"), sqlcon);
+            reader = sqlcom.ExecuteReader();
+            if(reader.HasRows)
+            {
+                while(reader.Read())
+                {
+                    Profile.OrderNo.Add(reader[1].ToString());
+                    Profile.DateTime.Add(reader[4].ToString());
+                    Profile.Status.Add(reader[5].ToString());
+
+                }
+                //get prices
+                
+            }
+            reader.Close();
+            if(Profile.OrderNo.Count>0)
+            {
+                for (int i = 0; i < Profile.OrderNo.Count; i++)
+                {
+                    int Total = 0;
+                    sqlcom = new SqlCommand("select * from OrderHelper where OrderNo='" + Profile.OrderNo[i] + "'", sqlcon);
+                    reader = sqlcom.ExecuteReader();
+                    if (reader.HasRows)
+                    {
+                        while (reader.Read())
+                        {
+                            Total += int.Parse(reader[3].ToString());
+                        }
+                    }
+                    reader.Close();
+                    Profile.Total.Add(Total.ToString());
+                }
+
+            }
+
+
+            sqlcon.Close();
+            return View(Profile);
+        }
+        public IActionResult Cart()
+        {
+            CartInfo CartInfo = new CartInfo();
+
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            string cart = HttpContext.Session.GetString("UserCart");
+            string Item;
+            CartInfo.CartItemCount = 0;
+            if (string.IsNullOrEmpty(cart) == false)
+            {
+
+
+                while (1 > 0)
+                {
+                    int index;
+                    index = cart.IndexOf("-");
+                    if (index == -1)
+                        break;
+                    Item = cart.Substring(0, index);
+
+                    if (CartInfo.WebCode.IndexOf(Item) != -1)
+                    {
+                        int a = CartInfo.WebCode.IndexOf(Item);
+                        CartInfo.ItemCount[a] = CartInfo.ItemCount[a] + 1;
+                    }
+                    else
+                    {
+                        CartInfo.WebCode.Add(Item);
+                        CartInfo.ItemCount.Add(1);
+                        SqlCommand sqlCommand = new SqlCommand("select * from items where WebCode='" + Item + "'", sqlcon);
+                        SqlDataReader reader = sqlCommand.ExecuteReader();
+                        if (reader.HasRows)
+                        {
+                            while (reader.Read())
+                            {
+                                CartInfo.ID.Add(int.Parse(reader[0].ToString()));
+                                CartInfo.Title.Add(reader[2].ToString());
+                                CartInfo.Description.Add(reader[3].ToString());
+                                CartInfo.Status.Add(reader[4].ToString());
+                                CartInfo.Price.Add(reader[5].ToString());
+                            }
+                        }
+                        reader.Close();
+                    }
+                    cart = cart.Substring(index + 1, (cart.Length - (index + 1)));
+                    CartInfo.CartItemCount += 1;
+                }
+            }
+            return View(CartInfo);
+        }
+        public IActionResult RemoveItemFromCart(string WebCode)
+        {
+            string Cart = HttpContext.Session.GetString("UserCart");
+            while (2 > 1)
+            {
+                int index = Cart.IndexOf(WebCode);
+                if (index == -1)
+                    break;
+                Cart = Cart.Remove(index, WebCode.Length + 1);
+            }
+            HttpContext.Session.SetString("UserCart", Cart);
+            if (HttpContext.Session.GetInt32("UserID") != null)
+            {
+                UpdateUserCart();
+            }
+            return RedirectToAction("Cart", "MyAccount");
+
+
+        }
+        public IActionResult ItemCountStepDown(string WebCode)
+        {
+            string Cart = HttpContext.Session.GetString("UserCart");
+
+            int index = Cart.IndexOf(WebCode);
+           
+            Cart = Cart.Remove(index, WebCode.Length + 1);
+
+            HttpContext.Session.SetString("UserCart", Cart);
+            if (HttpContext.Session.GetInt32("UserID") != null)
+            {
+                UpdateUserCart();
+            }
+            return RedirectToAction("Cart", "MyAccount");
+
+
+        }
+        public IActionResult ItemCountStepUp(string WebCode)
+        {
+            string Cart = HttpContext.Session.GetString("UserCart");
+
+
+            Cart += WebCode + "-";
+
+            HttpContext.Session.SetString("UserCart", Cart);
+            if(HttpContext.Session.GetInt32("UserID")!=null)
+            {
+                UpdateUserCart();
+            }
+            return RedirectToAction("Cart", "MyAccount");
+
+
+        }
+
+        public void UpdateUserCart()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand();
+            string cart = HttpContext.Session.GetString("UserCart");
+            sqlcom = new SqlCommand("update Customers set Cart='" + cart + "'", sqlcon);
+            sqlcom.ExecuteNonQuery();
+        }
+
+        public IActionResult Signout()
+        {
+            HttpContext.Session.Clear();
+            return RedirectToAction("Index", "Home");
+        }
+
+        public IActionResult PlaceNewOrder()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            string OrderNo = GenerateOrderNo();
+            SqlCommand sqlcom = new SqlCommand("select Address from Customers where CustomerID=" + HttpContext.Session.GetInt32("UserID"),sqlcon);
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            reader.Read();
+            string address = reader[0].ToString();
+            reader.Close();
+            sqlcom = new SqlCommand("insert into Orders(OrderNo,Customer,Address,DateTime,Status) Values('"+OrderNo+"','"+HttpContext.Session.GetInt32("UserID")+"','"+address+"','"+GetDate()+"','PENDING')", sqlcon);
+            sqlcom.ExecuteNonQuery();
+            string cart = HttpContext.Session.GetString("UserCart");
+            string Item;
+            int index;
+
+            while (1 > 0)
+            {
+                index = cart.IndexOf("-");
+                if (index == -1)
+                    break;
+                Item = cart.Substring(0, index);
+                string price=ReturnPrice(Item);
+
+
+  
+                
+
+                sqlcom = new SqlCommand("Insert into OrderHelper(OrderNo,ItemWebCode,Price,Status) values('"+OrderNo+"','"+Item+"','"+price+"','PENDING')", sqlcon);
+                sqlcom.ExecuteNonQuery();
+                cart = cart.Substring(index + 1, (cart.Length - (index + 1)));
+            }
+            sqlcon.Close();
+            TempData["OrderPlaced"] = OrderNo;
+            HttpContext.Session.Remove("UserCart");
+            return RedirectToAction("Cart", "MyAccount");
+
+        }
+        public static string GenerateOrderNo()
+        {
+            string result = "";
+            Random rand = new Random();
+            int num;
+            while (1 > 0)
+            {
+                for (int i = 0; i <= 5; i++)
+                {
+                    num = rand.Next(97, 122);
+                    result += ((char)num).ToString().ToUpper();
+                }
+                num = rand.Next(10, 99);
+                result += num.ToString();
+                SqlConnection sqlcon = new SqlConnection("Data Source=.;Initial Catalog='Retail Co V1';Integrated Security=True");
+                sqlcon.Open();
+                SqlCommand sqlcom = new SqlCommand("select * from Orders where OrderNo='" + result + "'", sqlcon);
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                if (reader.HasRows == false)
+                {
+                    sqlcon.Close();
+                    break;
+                }
+            }
+
+
+            return result;
+        }
+
+        public static string ReturnPrice(string WebCode)
+        {
+            string result = "";
+            SqlConnection sqlcon = new SqlConnection("Data Source=.;Initial Catalog='Retail Co V1';Integrated Security=True");
+            sqlcon.Open();
+            SqlCommand sqlCommand = new SqlCommand("select * from items where WebCode='" + WebCode + "'", sqlcon);
+            SqlDataReader reader = sqlCommand.ExecuteReader();
+            reader.Read();
+            result = reader[5].ToString();
+            reader.Close();
+            sqlcon.Close();
+            return result;
+        }
+        public static string GetDate()
+        {
+            string monthName = "";
+            if (DateTime.Now.Month == 1)
+            {
+                monthName = "Jan";
+            }
+            if (DateTime.Now.Month == 2)
+            {
+                monthName = "Feb";
+            }
+            if (DateTime.Now.Month == 3)
+            {
+                monthName = "Mar";
+            }
+            if (DateTime.Now.Month == 4)
+            {
+                monthName = "Apr";
+            }
+            if (DateTime.Now.Month == 5)
+            {
+                monthName = "May";
+            }
+            if (DateTime.Now.Month == 6)
+            {
+                monthName = "Jun";
+            }
+            if (DateTime.Now.Month == 7)
+            {
+                monthName = "Jul";
+            }
+            if (DateTime.Now.Month == 8)
+            {
+                monthName = "Aug";
+            }
+            if (DateTime.Now.Month == 9)
+            {
+                monthName = "Sep";
+            }
+            if (DateTime.Now.Month == 10)
+            {
+                monthName = "Oct";
+            }
+            if (DateTime.Now.Month == 11)
+            {
+                monthName = "Nov";
+            }
+            if (DateTime.Now.Month == 12)
+            {
+                monthName = "Dec";
+            }
+            return monthName + " " + DateTime.Now.Day+" "+DateTime.Now.Hour+":"+DateTime.Now.Minute;
+        }
+    }
+}
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using Retail_Co_V1.Models;
+using Microsoft.AspNetCore.Http;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class OrderController : Controller
+    {
+        private IConfiguration Configuration;
+        public OrderController(IConfiguration iConfig)
+        {
+            Configuration = iConfig;
+        }
+        public IActionResult TrackOrder(string OrderNumber)
+        {
+            OrderInfo Order = new OrderInfo();
+            if(OrderNumber==null)
+            {
+                Order.DataType = null;
+            }
+            else
+            {
+                Order.DataType = "Info";
+
+                string dbConn = Configuration.GetSection("SqlString").Value;
+
+                SqlConnection sqlcon = new SqlConnection(dbConn);
+                sqlcon.Open();
+                SqlCommand sqlcom = new SqlCommand("select * from Orders where OrderNo='"+OrderNumber+"'", sqlcon);
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                reader.Read();
+                Order.OrderNumber=reader[1].ToString();
+                Order.OrderDateTime=reader[4].ToString();
+                Order.OrderStatus=reader[5].ToString();
+                reader.Close();
+                //-----------fetch each item
+                sqlcom = new SqlCommand("select ItemWebCode,Price,Status from OrderHelper where OrderNo='" + OrderNumber + "'", sqlcon);
+                reader = sqlcom.ExecuteReader();
+                while(reader.Read())
+                {
+                    Order.ItemWebCode.Add(reader[0].ToString());
+                    Order.ItemPrice.Add(reader[1].ToString());
+                    Order.ItemStaus.Add(reader[2].ToString());
+                }
+                reader.Close();
+                for(int i=0;i<Order.ItemWebCode.Count;i++)
+                {
+                    sqlcom = new SqlCommand("select Title from Items where WebCode='"+Order.ItemWebCode[i]+"'", sqlcon);
+                    reader = sqlcom.ExecuteReader();
+                    reader.Read();
+                    Order.ItemTitle.Add(reader[0].ToString());
+                    reader.Close();
+                }
+            }
+            return View(Order);
+
+        }
+    }
+}
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using System.Data.SqlClient;
+using Retail_Co_V1.Models;
+using Microsoft.AspNetCore.Http;
+
+namespace Retail_Co_V1.Controllers
+{
+    public class ShopController : Controller
+    {
+        private IConfiguration Configuration;
+        public ShopController(IConfiguration iConfig)
+        {
+            Configuration = iConfig;
+        }
+        public IActionResult Products(string WebCode)
+        {
+            ItemsInfo Products = new ItemsInfo();
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand();
+            if (WebCode != null)
+            {
+                Products.DataType = "Product";
+                sqlcom = new SqlCommand("Select * from Reviews where WebCode='" + WebCode + "' and Status='APPROVED'", sqlcon);
+                SqlDataReader Reviews = sqlcom.ExecuteReader();
+                if(Reviews.HasRows)
+                {
+                    while(Reviews.Read())
+                    {
+                        Products.Reveiws_Username.Add(Reviews[2].ToString());
+                        Products.Reviews_IsVerified.Add(Reviews[3].ToString());
+
+                        Products.Reveiws_Date.Add(Reviews[4].ToString());
+                        Products.Reviews_Description.Add(Reviews[5].ToString());
+                    }
+                }
+                Reviews.Close();
+
+                sqlcom = new SqlCommand("select * from Items where WebCode='" + WebCode + "'", sqlcon);
+
+
+            }
+            else
+            {
+                Products.DataType = "Grid";
+                sqlcom = new SqlCommand("select * from Items", sqlcon);
+
+            }
+            SqlDataReader reader = sqlcom.ExecuteReader();
+            if (reader.HasRows)
+            {
+                while (reader.Read())
+                {
+                    Products.ID.Add(int.Parse(reader[0].ToString()));
+                    Products.WebCode.Add(reader[1].ToString());
+                    Products.Title.Add(reader[2].ToString());
+                    Products.Description.Add(reader[3].ToString());
+                    Products.Status.Add(reader[4].ToString());
+                    Products.Price.Add(reader[5].ToString());
+                    Products.ItemCount.Add(int.Parse(reader[6].ToString()));
+
+                }
+            }
+            reader.Close();
+            sqlcon.Close();
+            return View(Products);
+        }
+
+        public IActionResult AddToMyCart(string WebCode)
+        {
+            string cart = "";
+            cart = HttpContext.Session.GetString("UserCart");
+            cart += WebCode + "-";
+            HttpContext.Session.SetString("UserCart", cart);
+            if (HttpContext.Session.GetInt32("UserID") != null)
+            {
+                UpdateUserCart();
+            }
+            return RedirectToAction("Products", "Shop");
+        }
+        public void UpdateUserCart()
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+            SqlCommand sqlcom = new SqlCommand();
+            string cart = HttpContext.Session.GetString("UserCart");
+            sqlcom = new SqlCommand("update Customers set Cart='" + cart + "'", sqlcon);
+            sqlcom.ExecuteNonQuery();
+        }
+
+        public IActionResult PostReview(string UserReview, string WebCode)
+        {
+            string dbConn = Configuration.GetSection("SqlString").Value;
+            SqlConnection sqlcon = new SqlConnection(dbConn);
+            sqlcon.Open();
+
+            if (HttpContext.Session.GetInt32("UserID") == null)
+            {
+                SqlCommand sqlcom = new SqlCommand("Insert into Reviews(Username,IsVerified,Date,Description,Status,WebCode) Values('Guest','False','"+GetDate()+"','" + UserReview + "','PENDING','"+WebCode+"')",sqlcon);
+                sqlcom.ExecuteNonQuery();
+
+                TempData["UserReviewSubmission"] = "TRUE";
+
+            }
+            else
+            {
+                SqlCommand sqlcom = new SqlCommand("Select OrderNo from Orders where Customer='" + HttpContext.Session.GetInt32("UserID")+"'", sqlcon);
+                SqlDataReader reader = sqlcom.ExecuteReader();
+                List<string> OrderNumbers = new List<string>();
+                if(reader.HasRows)
+                {
+                    while(reader.Read())
+                    {
+                        OrderNumbers.Add(reader[0].ToString());
+                    }
+                    reader.Close();
+                    string IsVerified = "FALSE";
+                    for(int i=0;i<OrderNumbers.Count;i++)
+                    {
+                        string orderno = OrderNumbers[i];
+                        sqlcom = new SqlCommand("select ItemWebCode from OrderHelper where OrderNo='" + orderno + "'",sqlcon);
+                        reader = sqlcom.ExecuteReader();
+                        if(reader.HasRows)
+                        {
+                            while(reader.Read())
+                            {
+                                if(reader[0].ToString()==WebCode)
+                                {
+                                    IsVerified = "TRUE";
+                                    break;
+                                }
+                            }
+                            if (IsVerified == "TRUE")
+                                break;
+                            else
+                                reader.Close();
+                        }
+                        
+                    }
+                    reader.Close();
+                    sqlcom = new SqlCommand("Insert into Reviews(UserID,Username,IsVerified,Date,Description,Status,WebCode) Values("+HttpContext.Session.GetInt32("UserID")+",'"+HttpContext.Session.GetString("CustomerName")+"','"+IsVerified+"','" + GetDate() + "','" + UserReview + "','PENDING','"+WebCode+"')",sqlcon);
+                    sqlcom.ExecuteNonQuery();
+                    TempData["UserReviewSubmission"] = "TRUE";
+
+                }
+            }
+
+            sqlcon.Close();
+            return RedirectToAction("Products", new { WebCode = WebCode });
+        }
+
+        public static string GetDate()
+        {
+            string monthName = "";
+            if (DateTime.Now.Month == 1)
+            {
+                monthName = "Jan";
+            }
+            if (DateTime.Now.Month == 2)
+            {
+                monthName = "Feb";
+            }
+            if (DateTime.Now.Month == 3)
+            {
+                monthName = "Mar";
+            }
+            if (DateTime.Now.Month == 4)
+            {
+                monthName = "Apr";
+            }
+            if (DateTime.Now.Month == 5)
+            {
+                monthName = "May";
+            }
+            if (DateTime.Now.Month == 6)
+            {
+                monthName = "Jun";
+            }
+            if (DateTime.Now.Month == 7)
+            {
+                monthName = "Jul";
+            }
+            if (DateTime.Now.Month == 8)
+            {
+                monthName = "Aug";
+            }
+            if (DateTime.Now.Month == 9)
+            {
+                monthName = "Sep";
+            }
+            if (DateTime.Now.Month == 10)
+            {
+                monthName = "Oct";
+            }
+            if (DateTime.Now.Month == 11)
+            {
+                monthName = "Nov";
+            }
+            if (DateTime.Now.Month == 12)
+            {
+                monthName = "Dec";
+            }
+            return monthName + " " + DateTime.Now.Day;
+        }
+    }
+}
